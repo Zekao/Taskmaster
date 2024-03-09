@@ -1,0 +1,54 @@
+programs:
+  tests:
+    command: config/ratioa
+    args:
+      - "hello"
+      - "world"
+    environment:
+      key: BAZ
+    at_launch: true
+  rap:
+    command: config/ratio
+    args:
+      - "hello"
+      - "world"
+    environment:
+      key: BAZ
+    at_launch: true
+
+  hello:
+    command: /bin/echo
+    args:
+      - "hello"
+      - "world"
+    replicas: 3
+    at_launch: false
+    restart: on_failure
+    exit_code: 42
+    healthy_uptime: 5
+    retries: 3
+    signal: SIGTERM
+    exit_timeout: 10
+    stdout: /dev/null
+    stderr: /dev/null
+    environment:
+      key: BAZ
+    workdir: /app
+    umask: 777
+
+  world:
+    command: /bin/echo
+    replicas: 3
+    at_launch: false
+    restart: on_failure
+    exit_code: 42
+    healthy_uptime: 5
+    retries: 3
+    signal: SIGTERM
+    exit_timeout: 10
+    stdout: /dev/null
+    stderr: /dev/null
+    environment:
+      key: BAZ
+    workdir: /app
+    umask: 777

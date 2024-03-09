@@ -1,0 +1,20 @@
+[package]
+name = "rip-42sh"
+authors = [
+    "Nils Mathieu <nmathieu@student.42.fr>",
+    "Elidjah Maugalem <elidjah@42vienna.com>",
+]
+edition = "2021"
+version = "0.4.2"
+repository = "https://github.com/zekao/Taskmaster"
+publish = false
+readme = "README.md"
+
+[dependencies]
+ft = { git = "https://github.com/nils-mathieu/libft-rs", default-features = false, features = [
+    "alloc",
+    "readline",
+    "collections",
+] }
+serde_yaml = "0.9"
+serde = { version = "1", features = ["derive"] }
