@@ -11,10 +11,11 @@ publish = false
 readme = "README.md"
 
 [dependencies]
-ft = { git = "https://github.com/nils-mathieu/libft-rs", default-features = false, features = [
-    "alloc",
-    "readline",
-    "collections",
-] }
+libc = "0.2"
 serde_yaml = "0.9"
 serde = { version = "1", features = ["derive"] }
+ft = { git = "https://github.com/nils-mathieu/libft-rs", default-features = false, features = [
+    "readline",
+    "alloc",
+    "collections",
+] }

@@ -75,6 +75,7 @@ name = "rip-42sh"
 version = "0.4.2"
 dependencies = [
  "ft",
+ "libc",
  "serde",
  "serde_yaml",
 ]

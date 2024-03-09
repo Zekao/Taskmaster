@@ -5,28 +5,28 @@ use std::{
 };
 
 /// Deserializes a `umask` from a string as an octal number.
-fn deserialize_umask<'de, D>(deserializer: D) -> Result<Option<ft::fd::Mode>, D::Error>
+fn deserialize_umask<'de, D>(deserializer: D) -> Result<Option<libc::mode_t>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     struct UMaskVisitor;
 
     impl<'de> serde::de::Visitor<'de> for UMaskVisitor {
-        type Value = ft::fd::Mode;
+        type Value = libc::mode_t;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a number between 0 and 0o777")
         }
 
-        fn visit_str<E>(self, value: &str) -> Result<ft::fd::Mode, E>
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
         where
             E: serde::de::Error,
         {
-            let value = u16::from_str_radix(value, 8).map_err(E::custom)?;
+            let value = libc::mode_t::from_str_radix(value, 8).map_err(E::custom)?;
             if value > 0o777 {
                 return Err(E::custom("value must be between 0 and 0o777"));
             }
-            Ok(ft::fd::Mode::from_bits_retain(value))
+            Ok(value)
         }
     }
 
@@ -91,11 +91,14 @@ pub struct ProgramConfig {
     #[serde(default)]
     pub exit_timeout: Option<f64>,
     /// If set, the process's standard output will be redirected to this file.
-    #[serde(default = "defaults::stdout")]
-    pub stdout: PathBuf,
+    #[serde(default)]
+    pub stdout: Option<PathBuf>,
     /// If set, the process's standard error will be redirected to this file.
-    #[serde(default = "defaults::stderr")]
-    pub stderr: PathBuf,
+    #[serde(default)]
+    pub stderr: Option<PathBuf>,
+    /// If set, the process's standard input will be redirected from this file.
+    #[serde(default)]
+    pub stdin: Option<PathBuf>,
     /// The environment variables to set for the process.
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
@@ -104,20 +107,10 @@ pub struct ProgramConfig {
     pub workdir: Option<PathBuf>,
     /// The mask to apply when launching the process.
     #[serde(default, deserialize_with = "deserialize_umask")]
-    pub umask: Option<ft::fd::Mode>,
+    pub umask: Option<libc::mode_t>,
 }
 
 mod defaults {
-    use std::path::PathBuf;
-
-    pub fn stdout() -> PathBuf {
-        PathBuf::from("/dev/null")
-    }
-
-    pub fn stderr() -> PathBuf {
-        PathBuf::from("/dev/null")
-    }
-
     pub fn retries() -> u32 {
         3
     }

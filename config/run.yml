@@ -1,12 +1,14 @@
 programs:
   tests:
-    command: config/ratioa
-    args:
-      - "hello"
-      - "world"
+    command: /bin/ls
     environment:
       key: BAZ
     at_launch: true
+    workdir: /tmp
+    stdout: /Users/zekao/Desktop/42 | Projects/Taskmaster/ntm.txt
+    restart: on_failure
+    exit_code: 42
+
   rap:
     command: config/ratio
     args:
@@ -14,6 +16,7 @@ programs:
       - "world"
     environment:
       key: BAZ
+    healthy_uptime: 5
     at_launch: true
 
   hello:
