@@ -8,16 +8,18 @@ use std::{
     path::Path,
     process::Command,
     sync::{
-        atomic::{AtomicU32, Ordering::Relaxed},
+        atomic::{AtomicBool, Ordering::Relaxed},
         Arc, Condvar, Mutex,
     },
-    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
+use libc::pid_t;
+
 use crate::{
     config::{ProgramConfig, RestartPolicy, StopSignal},
-    LogEvent, LogEventKind, LogSender,
+    logs::{LogEvent, LogEventKind},
+    LogSender,
 };
 
 /// Opens a file for appending.
@@ -187,15 +189,17 @@ impl Display for ExitCode {
     }
 }
 
-/// The state of the observer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ObserverState {
-    /// The observer should exit.
-    ExitingTaskmaster,
-    /// The observer should spawn a new process.
-    Spawn,
-    /// The observer should not spawn a new process.
-    Wait,
+/// The state of the observer thread.
+#[derive(Debug)]
+pub struct ObserverState {
+    /// Whether the process structure itself is being removed.
+    pub process_removed: bool,
+    /// Whether new processes should spawned when possible.
+    pub standby: bool,
+    /// Whether the process must be restarted regardless of its exit code.
+    ///
+    /// This also resets the restart count.
+    pub restart: bool,
 }
 
 /// The name of a running process.
@@ -229,38 +233,21 @@ struct ProcessState {
     observer_state_cond: Condvar,
 
     /// The PID of the process.
-    pid: Mutex<Option<libc::pid_t>>,
-
-    /// The number of times the process has been restarted.
-    retry_count: AtomicU32,
+    pid: Mutex<Option<pid_t>>,
 }
 
 impl ProcessState {
-    /// Updates the `wants_to_be_running` flag.
-    pub fn set_observer_state(&self, value: ObserverState) {
-        let mut lock = self.observer_state.lock().unwrap();
-        if *lock != value {
-            *lock = value;
-            self.observer_state_cond.notify_one();
-        }
-    }
-
-    /// Waits until the observer state is no longer `Wait`. The new value is returned.
-    pub fn wait_observer_state(&self) -> ObserverState {
+    /// Updates the observer state and notifies the condition variable.
+    pub fn update_observer_state(&self, f: impl FnOnce(&mut ObserverState)) {
         let mut state = self.observer_state.lock().unwrap();
-        while *state == ObserverState::Wait {
-            state = self.observer_state_cond.wait(state).unwrap();
-        }
-        *state
+        f(&mut state);
+        self.observer_state_cond.notify_all();
     }
 }
 
-/// Stores information about a running program.
 pub struct Process {
     /// The shared state.
     state: Arc<ProcessState>,
-    /// The observer thread that watches the process.
-    observer_thread: JoinHandle<()>,
 }
 
 impl Process {
@@ -273,27 +260,22 @@ impl Process {
             name,
             config,
 
-            observer_state: Mutex::new(if start_now {
-                ObserverState::Spawn
-            } else {
-                ObserverState::Wait
+            observer_state: Mutex::new(ObserverState {
+                process_removed: false,
+                standby: !start_now,
+                restart: false,
             }),
             observer_state_cond: Condvar::new(),
 
             pid: Mutex::new(None),
-
-            retry_count: AtomicU32::new(0),
         });
 
-        let observer_thread = std::thread::spawn({
+        std::thread::spawn({
             let state = Arc::clone(&state);
             move || process_observer(log_sender, state)
         });
 
-        Self {
-            state,
-            observer_thread,
-        }
+        Self { state }
     }
 
     /// Returns the name of the process.
@@ -314,7 +296,7 @@ impl Process {
             return Err(ProcessError::AlreadyStarted);
         }
 
-        self.state.set_observer_state(ObserverState::Spawn);
+        self.state.update_observer_state(|s| s.standby = false);
         Ok(())
     }
 
@@ -330,28 +312,40 @@ impl Process {
 
     /// Requests the process to stop.
     pub fn request_stop(&self) -> Result<(), ProcessError> {
-        self.state.set_observer_state(ObserverState::Wait);
+        self.state.update_observer_state(|s| s.standby = true);
         self.send_stop_signal(self.state.config.signal)
     }
 
     /// Forces the process to stop.
     pub fn force_stop(&self) -> Result<(), ProcessError> {
-        self.state.set_observer_state(ObserverState::Wait);
+        self.state.update_observer_state(|s| s.standby = true);
         self.send_stop_signal(StopSignal::Kill)
     }
 
     /// Requests the process to restart.
     pub fn request_restart(&self) -> Result<(), ProcessError> {
-        self.state.retry_count.store(0, Relaxed);
-        self.state.set_observer_state(ObserverState::Spawn);
+        self.state.update_observer_state(|s| {
+            s.standby = true;
+            s.restart = true;
+        });
         self.send_stop_signal(self.state.config.signal)
     }
 
     /// Forces the process to restart.
     pub fn force_restart(&self) -> Result<(), ProcessError> {
-        self.state.retry_count.store(0, Relaxed);
-        self.state.set_observer_state(ObserverState::Spawn);
+        self.state.update_observer_state(|s| {
+            s.standby = true;
+            s.restart = true;
+        });
         self.send_stop_signal(StopSignal::Kill)
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        self.force_stop().unwrap();
+        self.state
+            .update_observer_state(|s| s.process_removed = true);
     }
 }
 
@@ -365,12 +359,24 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
         Duration::from_secs_f64(state.config.healthy_uptime)
     };
 
-    loop {
+    let mut retry_count = 0;
+
+    'main: loop {
         // Wait until we need to do something.
-        match state.wait_observer_state() {
-            ObserverState::Spawn => (),
-            ObserverState::ExitingTaskmaster => break,
-            ObserverState::Wait => continue, // weird but ok
+        {
+            let mut lock = state.observer_state.lock().unwrap();
+            while lock.standby && !lock.restart {
+                if lock.process_removed {
+                    break 'main;
+                }
+
+                lock = state.observer_state_cond.wait(lock).unwrap();
+            }
+
+            if lock.restart {
+                lock.restart = false;
+                retry_count = 0;
+            }
         }
 
         let pid = match command.spawn() {
@@ -383,12 +389,14 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
                         name: state.name.clone(),
                     })
                     .unwrap();
-                state.set_observer_state(ObserverState::Wait);
+                state.update_observer_state(|s| s.standby = true);
                 continue;
             }
         };
 
-        assert!(state.pid.lock().unwrap().replace(pid).is_none());
+        *state.pid.lock().unwrap() = Some(pid);
+
+        let has_been_stopped = Arc::new(AtomicBool::new(false));
 
         if healthy_uptime.is_zero() {
             log_sender
@@ -407,16 +415,17 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
                 })
                 .unwrap();
 
-            let state = state.clone();
+            let name = state.name.clone();
             let log_sender = log_sender.clone();
+            let has_been_stopped = has_been_stopped.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(healthy_uptime);
-                if state.pid.lock().unwrap().is_some() {
+                if !has_been_stopped.load(Relaxed) {
                     log_sender
                         .send(LogEvent {
                             kind: LogEventKind::Started,
                             time: Instant::now(),
-                            name: state.name.clone(),
+                            name,
                         })
                         .unwrap();
                 }
@@ -425,6 +434,7 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
 
         let status = wait_pid(pid).unwrap();
         *state.pid.lock().unwrap() = None;
+        has_been_stopped.store(true, Relaxed);
 
         log_sender
             .send(LogEvent {
@@ -436,15 +446,16 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
 
         match state.config.restart {
             RestartPolicy::OnFailure if status.like_bash() == state.config.exit_code => {
-                state.set_observer_state(ObserverState::Wait);
+                state.observer_state.lock().unwrap().standby = true;
             }
             RestartPolicy::OnFailure | RestartPolicy::Always => {
-                if state.retry_count.fetch_add(1, Relaxed) >= state.config.retries {
-                    state.set_observer_state(ObserverState::Wait);
+                retry_count += 1;
+                if retry_count > state.config.retries {
+                    state.observer_state.lock().unwrap().standby = true;
                 }
             }
             RestartPolicy::Never => {
-                state.set_observer_state(ObserverState::Wait);
+                state.observer_state.lock().unwrap().standby = true;
             }
         }
     }

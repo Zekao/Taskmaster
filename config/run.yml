@@ -5,7 +5,7 @@ programs:
     restart: on_failure
     exit_code: 130
     signal: SIGINT
-    replicas: 10
+    replicas: 3
     healthy_uptime: 5
 
   tests:

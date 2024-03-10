@@ -1,6 +1,7 @@
 use crate::Taskmaster;
 
 pub fn status(line: &str, taskmaster: &Taskmaster) {
+    let _ = (line, taskmaster);
     todo!("status")
 }
 
