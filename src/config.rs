@@ -66,6 +66,8 @@ pub enum StopSignal {
     Usr2,
     #[serde(rename = "SIGSTOP")]
     Stop,
+    #[serde(rename = "SIGALRM")]
+    Alarm,
 }
 
 impl StopSignal {
@@ -80,6 +82,7 @@ impl StopSignal {
             StopSignal::Usr1 => libc::SIGUSR1,
             StopSignal::Usr2 => libc::SIGUSR2,
             StopSignal::Stop => libc::SIGSTOP,
+            StopSignal::Alarm => libc::SIGALRM,
         }
     }
 }
