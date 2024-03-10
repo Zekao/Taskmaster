@@ -56,6 +56,32 @@ pub enum StopSignal {
     Term,
     #[serde(rename = "SIGHUP")]
     Hup,
+    #[serde(rename = "SIGQUIT")]
+    Quit,
+    #[serde(rename = "SIGKILL")]
+    Kill,
+    #[serde(rename = "SIGUSR1")]
+    Usr1,
+    #[serde(rename = "SIGUSR2")]
+    Usr2,
+    #[serde(rename = "SIGSTOP")]
+    Stop,
+}
+
+impl StopSignal {
+    /// Returns the raw signal number for the signal.
+    pub fn as_raw_signal(&self) -> libc::c_int {
+        match self {
+            StopSignal::Hup => libc::SIGHUP,
+            StopSignal::Int => libc::SIGINT,
+            StopSignal::Quit => libc::SIGQUIT,
+            StopSignal::Term => libc::SIGTERM,
+            StopSignal::Kill => libc::SIGKILL,
+            StopSignal::Usr1 => libc::SIGUSR1,
+            StopSignal::Usr2 => libc::SIGUSR2,
+            StopSignal::Stop => libc::SIGSTOP,
+        }
+    }
 }
 
 /// The configuration of a specific process.
@@ -77,7 +103,7 @@ pub struct ProgramConfig {
     pub restart: RestartPolicy,
     /// The expected exit code of the program.
     #[serde(default = "defaults::exit_code")]
-    pub exit_code: i32,
+    pub exit_code: u32,
     /// The amount of time to wait before marking the process as "healthy".
     #[serde(default = "defaults::healthy_uptime")]
     pub healthy_uptime: f64,
@@ -111,6 +137,7 @@ pub struct ProgramConfig {
 }
 
 mod defaults {
+
     pub fn retries() -> u32 {
         3
     }
@@ -119,7 +146,7 @@ mod defaults {
         0.0
     }
 
-    pub fn exit_code() -> i32 {
+    pub fn exit_code() -> u32 {
         0
     }
 

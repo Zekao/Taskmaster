@@ -1,11 +1,20 @@
 programs:
+  goodnight:
+    command: config/goodnight
+    at_launch: true
+    restart: on_failure
+    exit_code: 130
+    signal: SIGINT
+    replicas: 10
+    healthy_uptime: 5
+
   tests:
     command: /bin/ls
     environment:
       key: BAZ
     at_launch: true
     workdir: /tmp
-    stdout: /Users/zekao/Desktop/42 | Projects/Taskmaster/ntm.txt
+    stdout: /Users/zekao/Desktop/42 | Projects/Taskmaster/ntm_test.txt
     restart: on_failure
     exit_code: 42
 
