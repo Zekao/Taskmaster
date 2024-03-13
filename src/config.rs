@@ -88,7 +88,7 @@ impl StopSignal {
 }
 
 /// The configuration of a specific process.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ProgramConfig {
     /// The command to use to start the program.
     pub command: PathBuf,
@@ -117,8 +117,8 @@ pub struct ProgramConfig {
     #[serde(default)]
     pub signal: StopSignal,
     /// The amount of time to wait before sending a `SIGKILL` signal to the process.
-    #[serde(default)]
-    pub exit_timeout: Option<f64>,
+    #[serde(default = "defaults::exit_timeout")]
+    pub exit_timeout: f64,
     /// If set, the process's standard output will be redirected to this file.
     #[serde(default)]
     pub stdout: Option<PathBuf>,
@@ -140,7 +140,6 @@ pub struct ProgramConfig {
 }
 
 mod defaults {
-
     pub fn retries() -> u32 {
         3
     }
@@ -159,6 +158,10 @@ mod defaults {
 
     pub fn replicas() -> usize {
         1
+    }
+
+    pub fn exit_timeout() -> f64 {
+        10.0
     }
 }
 
@@ -179,4 +182,44 @@ impl Config {
         let file = std::fs::File::open(file).unwrap();
         serde_yaml::from_reader(file).unwrap()
     }
+
+    /// Computes the difference between `old` and `self`.
+    pub fn diff_since(&self, old: &Self) -> Vec<ConfigDiff> {
+        let mut diffs = Vec::new();
+
+        // Programs that are in `self`, but not in `old` are added.
+        for (name, program) in self.programs.iter() {
+            if !old.programs.contains_key(name) {
+                diffs.push(ConfigDiff::AddedProgram(name.clone(), program.clone()));
+            }
+        }
+
+        // Programs that are in `old`, but not in `self` are removed.
+        for (name, _) in old.programs.iter() {
+            if !self.programs.contains_key(name) {
+                diffs.push(ConfigDiff::RemovedProgram(name.clone()));
+            }
+        }
+
+        // Programs that are in both `old` and `self` are compared.
+        for (name, program) in self.programs.iter() {
+            if let Some(old_program) = old.programs.get(name) {
+                if old_program != program {
+                    diffs.push(ConfigDiff::ModifiedProgram(name.clone(), program.clone()));
+                }
+            }
+        }
+
+        diffs
+    }
+}
+
+/// A difference between two [`Config`] instances.
+pub enum ConfigDiff {
+    /// A program has been added.
+    AddedProgram(String, ProgramConfig),
+    /// A program has been removed.
+    RemovedProgram(String),
+    /// A program has been modified.
+    ModifiedProgram(String, ProgramConfig),
 }

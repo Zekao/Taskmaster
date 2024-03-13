@@ -19,6 +19,8 @@ pub enum LogEventKind {
     Failed(String),
     /// A process has exited.
     Exited(ExitCode),
+    /// A process has been killed.
+    Killed,
 }
 
 /// An event that can be logged.
@@ -68,6 +70,9 @@ pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<Taskmaster>) {
                 }
 
                 print!("exit code {}", status);
+            }
+            LogEventKind::Killed => {
+                print!("\x1B[1;31mKILLED\x1B[0m    ");
             }
         }
 

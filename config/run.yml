@@ -8,6 +8,14 @@ programs:
     replicas: 3
     healthy_uptime: 5
 
+  signal:
+    command: config/signal
+    at_launch: true
+    restart: on_failure
+    exit_code: 130
+    signal: SIGINT
+    replicas: 1
+    healthy_uptime: 5
   tests:
     command: /bin/ls
     environment:

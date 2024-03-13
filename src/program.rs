@@ -220,6 +220,21 @@ impl Display for ProcessName {
     }
 }
 
+/// Information about the process that is currently running.
+struct RunningProcess {
+    pub started_at: Instant,
+    pub pid: pid_t,
+}
+
+impl RunningProcess {
+    pub fn started_right_now(pid: pid_t) -> Self {
+        Self {
+            started_at: Instant::now(),
+            pid,
+        }
+    }
+}
+
 /// The state that is shared between the main thread and background threads.
 struct ProcessState {
     /// The name of the process.
@@ -233,7 +248,7 @@ struct ProcessState {
     observer_state_cond: Condvar,
 
     /// The PID of the process.
-    pid: Mutex<Option<pid_t>>,
+    pid: Mutex<Option<RunningProcess>>,
 }
 
 impl ProcessState {
@@ -243,11 +258,22 @@ impl ProcessState {
         f(&mut state);
         self.observer_state_cond.notify_all();
     }
+
+    pub fn send_stop_signal(&self, signal: StopSignal) -> Result<(), ProcessError> {
+        let running_process = self.pid.lock().unwrap();
+        let running_process = running_process.as_ref().ok_or(ProcessError::NotStarted)?;
+        send_signal(running_process.pid, signal)
+    }
+
+    pub fn force_stop(&self) -> Result<(), ProcessError> {
+        self.update_observer_state(|s| s.standby = true);
+        self.send_stop_signal(StopSignal::Kill)
+    }
 }
 
 pub struct Process {
-    /// The shared state.
     state: Arc<ProcessState>,
+    log_sender: LogSender,
 }
 
 impl Process {
@@ -272,10 +298,11 @@ impl Process {
 
         std::thread::spawn({
             let state = Arc::clone(&state);
+            let log_sender = log_sender.clone();
             move || process_observer(log_sender, state)
         });
 
-        Self { state }
+        Self { state, log_sender }
     }
 
     /// Returns the name of the process.
@@ -300,26 +327,58 @@ impl Process {
         Ok(())
     }
 
-    /// Sends the provided signal to the process.
-    ///
-    /// This function requests the process to stop and prevents the observer thread
-    /// from attempting to restart it.
-    fn send_stop_signal(&self, signal: StopSignal) -> Result<(), ProcessError> {
-        let pid = self.state.pid.lock().unwrap();
-        let pid = pid.ok_or(ProcessError::NotStarted)?;
-        send_signal(pid, signal)
-    }
-
     /// Requests the process to stop.
+    ///
+    /// This function will also create a new thread in order to check if the process has been
+    /// correctly stopped after the configured timeout.
     pub fn request_stop(&self) -> Result<(), ProcessError> {
-        self.state.update_observer_state(|s| s.standby = true);
-        self.send_stop_signal(self.state.config.signal)
+        let state = self.state.clone();
+        let log_sender = self.log_sender.clone();
+
+        state.send_stop_signal(self.state.config.signal)?;
+        state.update_observer_state(|s| s.standby = true);
+
+        std::thread::spawn(move || {
+            // The process is still running because the STARTED instant is still in the past.
+            // ---------------------------------------------->
+            //          |                |
+            //        STARTED          STOP REQUEST
+            //
+            // The process has stoped because the STARTED instant is in the future.
+            // ---------------------------------------------->
+            //         |                |
+            //      STOP REQUEST      STARTED
+
+            let stop_request_instant = Instant::now();
+
+            std::thread::sleep(duration_from_f64(state.config.exit_timeout));
+
+            let running_process = state.pid.lock().unwrap();
+            if running_process
+                .as_ref()
+                .is_some_and(|running_process| running_process.started_at < stop_request_instant)
+            {
+                drop(running_process);
+
+                if let Err(err) = state.force_stop() {
+                    println!("failed to force_stop: {}", err);
+                }
+                log_sender
+                    .send(LogEvent {
+                        kind: LogEventKind::Killed,
+                        time: Instant::now(),
+                        name: state.name.clone(),
+                    })
+                    .unwrap();
+            }
+        });
+
+        Ok(())
     }
 
     /// Forces the process to stop.
     pub fn force_stop(&self) -> Result<(), ProcessError> {
-        self.state.update_observer_state(|s| s.standby = true);
-        self.send_stop_signal(StopSignal::Kill)
+        self.state.force_stop()
     }
 
     /// Requests the process to restart.
@@ -328,7 +387,7 @@ impl Process {
             s.standby = true;
             s.restart = true;
         });
-        self.send_stop_signal(self.state.config.signal)
+        self.state.send_stop_signal(self.state.config.signal)
     }
 
     /// Forces the process to restart.
@@ -337,7 +396,7 @@ impl Process {
             s.standby = true;
             s.restart = true;
         });
-        self.send_stop_signal(StopSignal::Kill)
+        self.state.send_stop_signal(StopSignal::Kill)
     }
 }
 
@@ -353,11 +412,7 @@ impl Drop for Process {
 fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
     let mut command = create_command(&state.config);
 
-    let healthy_uptime = if state.config.healthy_uptime <= 0.0 {
-        Duration::ZERO
-    } else {
-        Duration::from_secs_f64(state.config.healthy_uptime)
-    };
+    let healthy_uptime = duration_from_f64(state.config.healthy_uptime);
 
     let mut retry_count = 0;
 
@@ -394,7 +449,7 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
             }
         };
 
-        *state.pid.lock().unwrap() = Some(pid);
+        *state.pid.lock().unwrap() = Some(RunningProcess::started_right_now(pid));
 
         let has_been_stopped = Arc::new(AtomicBool::new(false));
 
@@ -459,4 +514,8 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
             }
         }
     }
+}
+
+fn duration_from_f64(value: f64) -> Duration {
+    Duration::try_from_secs_f64(value).unwrap_or_default()
 }
