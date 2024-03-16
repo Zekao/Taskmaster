@@ -10,15 +10,23 @@ mod logs;
 mod program;
 
 const CONFIG_DEFAULT_PATH: &str = "config/run.yml";
+const LOG_DEFAULT_PATH: &str = "taskmaster.log";
 
 fn main() {
     let config = Config::parse(CONFIG_DEFAULT_PATH.as_ref());
     let (log_sender, log_receiver) = std::sync::mpsc::channel();
     let taskmaster = Arc::new(RwLock::new(Taskmaster::new(log_sender, config)));
 
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open(LOG_DEFAULT_PATH)
+        .unwrap();
+
     std::thread::spawn({
         let taskmaster = taskmaster.clone();
-        move || logs::gather_logs(log_receiver, taskmaster)
+        move || logs::gather_logs(log_receiver, taskmaster, file)
     });
 
     run_shell(taskmaster);

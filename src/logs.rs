@@ -1,4 +1,5 @@
 use std::{
+    io::Write,
     sync::{Arc, RwLock},
     time::Instant,
 };
@@ -38,7 +39,11 @@ pub struct LogEvent {
 }
 
 /// Gathers the logs and do stuff with them.
-pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<RwLock<Taskmaster>>) {
+pub fn gather_logs(
+    receiver: LogReceiver,
+    taskmaster: Arc<RwLock<Taskmaster>>,
+    mut file: std::fs::File,
+) {
     let start_instant = Instant::now();
 
     while let Ok(ev) = receiver.recv() {
@@ -48,20 +53,26 @@ pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<RwLock<Taskmaster>>) {
         let secs = since_start.as_secs();
         let mins = secs / 60;
         let hours = mins / 60;
-        print!(
-            "{:02}:{:02}:{:02}.{:03}  ",
-            hours,
-            mins % 60,
-            secs % 60,
-            millis
+        special_print(
+            &format!(
+                "{:02}:{:02}:{:02}.{:03}  ",
+                hours,
+                mins % 60,
+                secs % 60,
+                millis
+            ),
+            &mut file,
         );
 
-        print!("\x1B[1m{: <10}\x1B[0m  ", ev.name);
+        special_print(&format!("{: <10}  ", ev.name), &mut file);
 
         match ev.kind {
-            LogEventKind::Starting => print!("\x1B[1;36mSTARTING\x1B[0m  "),
-            LogEventKind::Started => print!("\x1B[1;32mSTARTED\x1B[0m   "),
-            LogEventKind::Failed(message) => print!("\x1B[1;31mFAILED\x1B[0m    {message}"),
+            LogEventKind::Starting => special_print("\x1B[1;36mSTARTING\x1B[0m  ", &mut file),
+            LogEventKind::Started => special_print("\x1B[1;32mSTARTED\x1B[0m   ", &mut file),
+            LogEventKind::Failed(message) => {
+                special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file);
+                special_print(&message, &mut file);
+            }
             LogEventKind::Exited(status) => {
                 if taskmaster
                     .read()
@@ -69,18 +80,23 @@ pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<RwLock<Taskmaster>>) {
                     .get_process_by_process_name(&ev.name)
                     .is_some_and(|p| p.config().read().unwrap().exit_code != status.like_bash())
                 {
-                    print!("\x1B[1;31mFAILED\x1B[0m    ")
+                    special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file);
                 } else {
-                    print!("\x1B[1;33mEXITED\x1B[0m    ");
+                    special_print("\x1B[1;33mEXITED\x1B[0m    ", &mut file);
                 }
 
-                print!("exit code {}", status);
+                special_print(&format!("exit code {}", status), &mut file);
             }
             LogEventKind::Killed => {
-                print!("\x1B[1;31mKILLED\x1B[0m    ");
+                special_print("\x1B[1;31mKILLED\x1B[0m    ", &mut file);
             }
         }
 
-        println!();
+        special_print("\n", &mut file);
     }
+}
+
+fn special_print(string: &str, file: &mut std::fs::File) {
+    print!("{}", string);
+    file.write_all(string.as_bytes()).unwrap();
 }
