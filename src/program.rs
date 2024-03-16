@@ -220,8 +220,9 @@ impl Display for ProcessName {
     }
 }
 
+#[derive(Debug)]
 /// Information about the process that is currently running.
-struct RunningProcess {
+pub struct RunningProcess {
     pub started_at: Instant,
     pub pid: pid_t,
 }
@@ -235,20 +236,21 @@ impl RunningProcess {
     }
 }
 
+#[derive(Debug)]
 /// The state that is shared between the main thread and background threads.
-struct ProcessState {
+pub struct ProcessState {
     /// The name of the process.
-    name: ProcessName,
+    pub name: ProcessName,
     /// The configuration of the process.
-    config: RwLock<ProgramConfig>,
+    pub config: RwLock<ProgramConfig>,
 
     /// Whether the process wants to be running.
-    observer_state: Mutex<ObserverState>,
+    pub observer_state: Mutex<ObserverState>,
     /// A condition variable that is notified when the process wants to be running.
-    observer_state_cond: Condvar,
+    pub observer_state_cond: Condvar,
 
     /// The PID of the process.
-    pid: Mutex<Option<RunningProcess>>,
+    pub pid: Mutex<Option<RunningProcess>>,
 }
 
 impl ProcessState {
@@ -270,9 +272,9 @@ impl ProcessState {
         self.send_stop_signal(StopSignal::Kill)
     }
 }
-
+#[derive(Debug)]
 pub struct Process {
-    state: Arc<ProcessState>,
+    pub state: Arc<ProcessState>,
     log_sender: LogSender,
 }
 

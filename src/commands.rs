@@ -8,7 +8,16 @@ use crate::{
 
 pub fn status(line: &str, taskmaster: &Taskmaster) {
     let _ = (line, taskmaster);
-    todo!("status")
+    for process in taskmaster.processes.iter() {
+        match process.state.pid.lock().unwrap().as_ref() {
+            Some(content) => {
+                println!("{:<12} | {:<6} | running", process.name().name, content.pid)
+            }
+            None => {
+                println!("{:<12} | {:6} | not running", process.name().name, "");
+            }
+        }
+    }
 }
 
 pub fn start(line: &str, taskmaster: &Taskmaster) {
