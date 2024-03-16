@@ -96,6 +96,7 @@ pub fn gather_logs(
     }
 }
 
+/// Prints a string to the standard output and to a file.
 fn special_print(string: &str, file: &mut std::fs::File) {
     print!("{}", string);
     file.write_all(string.as_bytes()).unwrap();
