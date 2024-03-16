@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use crate::{
     program::{ExitCode, ProcessName},
@@ -35,7 +38,7 @@ pub struct LogEvent {
 }
 
 /// Gathers the logs and do stuff with them.
-pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<Taskmaster>) {
+pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<RwLock<Taskmaster>>) {
     let start_instant = Instant::now();
 
     while let Ok(ev) = receiver.recv() {
@@ -61,8 +64,10 @@ pub fn gather_logs(receiver: LogReceiver, taskmaster: Arc<Taskmaster>) {
             LogEventKind::Failed(message) => print!("\x1B[1;31mFAILED\x1B[0m    {message}"),
             LogEventKind::Exited(status) => {
                 if taskmaster
+                    .read()
+                    .unwrap()
                     .get_process_by_process_name(&ev.name)
-                    .is_some_and(|p| p.config().exit_code != status.like_bash())
+                    .is_some_and(|p| p.config().read().unwrap().exit_code != status.like_bash())
                 {
                     print!("\x1B[1;31mFAILED\x1B[0m    ")
                 } else {

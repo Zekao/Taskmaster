@@ -9,7 +9,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering::Relaxed},
-        Arc, Condvar, Mutex,
+        Arc, Condvar, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -240,7 +240,7 @@ struct ProcessState {
     /// The name of the process.
     name: ProcessName,
     /// The configuration of the process.
-    config: ProgramConfig,
+    config: RwLock<ProgramConfig>,
 
     /// Whether the process wants to be running.
     observer_state: Mutex<ObserverState>,
@@ -284,7 +284,7 @@ impl Process {
 
         let state = Arc::new(ProcessState {
             name,
-            config,
+            config: RwLock::new(config),
 
             observer_state: Mutex::new(ObserverState {
                 process_removed: false,
@@ -313,8 +313,14 @@ impl Process {
 
     /// Returns the configuration of the process.
     #[inline]
-    pub fn config(&self) -> &ProgramConfig {
+    pub fn config(&self) -> &RwLock<ProgramConfig> {
         &self.state.config
+    }
+
+    /// Returns whether the process is running.
+    #[inline]
+    pub fn is_running(&self) -> bool {
+        self.state.pid.lock().unwrap().is_some()
     }
 
     /// Requests the process to start.
@@ -335,7 +341,7 @@ impl Process {
         let state = self.state.clone();
         let log_sender = self.log_sender.clone();
 
-        state.send_stop_signal(self.state.config.signal)?;
+        state.send_stop_signal(self.state.config.read().unwrap().signal)?;
         state.update_observer_state(|s| s.standby = true);
 
         std::thread::spawn(move || {
@@ -351,7 +357,7 @@ impl Process {
 
             let stop_request_instant = Instant::now();
 
-            std::thread::sleep(duration_from_f64(state.config.exit_timeout));
+            std::thread::sleep(duration_from_f64(state.config.read().unwrap().exit_timeout));
 
             let running_process = state.pid.lock().unwrap();
             if running_process
@@ -387,7 +393,8 @@ impl Process {
             s.standby = true;
             s.restart = true;
         });
-        self.state.send_stop_signal(self.state.config.signal)
+        self.state
+            .send_stop_signal(self.state.config.read().unwrap().signal)
     }
 
     /// Forces the process to restart.
@@ -410,9 +417,9 @@ impl Drop for Process {
 
 /// Observes a running process. This should be running in a background thread.
 fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
-    let mut command = create_command(&state.config);
+    let mut command = create_command(&state.config.read().unwrap());
 
-    let healthy_uptime = duration_from_f64(state.config.healthy_uptime);
+    let healthy_uptime = duration_from_f64(state.config.read().unwrap().healthy_uptime);
 
     let mut retry_count = 0;
 
@@ -420,20 +427,17 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
         // Wait until we need to do something.
         {
             let mut lock = state.observer_state.lock().unwrap();
-            while lock.standby && !lock.restart {
-                if lock.process_removed {
-                    break 'main;
-                }
-
+            while !lock.process_removed && lock.standby && !lock.restart {
                 lock = state.observer_state_cond.wait(lock).unwrap();
             }
-
+            if lock.process_removed {
+                break 'main;
+            }
             if lock.restart {
                 lock.restart = false;
                 retry_count = 0;
             }
         }
-
         let pid = match command.spawn() {
             Ok(child) => child.id() as libc::pid_t,
             Err(err) => {
@@ -499,13 +503,15 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
             })
             .unwrap();
 
-        match state.config.restart {
-            RestartPolicy::OnFailure if status.like_bash() == state.config.exit_code => {
+        match state.config.read().unwrap().restart {
+            RestartPolicy::OnFailure
+                if status.like_bash() == state.config.read().unwrap().exit_code =>
+            {
                 state.observer_state.lock().unwrap().standby = true;
             }
             RestartPolicy::OnFailure | RestartPolicy::Always => {
                 retry_count += 1;
-                if retry_count > state.config.retries {
+                if retry_count > state.config.read().unwrap().retries {
                     state.observer_state.lock().unwrap().standby = true;
                 }
             }
@@ -514,6 +520,7 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
             }
         }
     }
+    println!("Process observer for {} is stopping", state.name);
 }
 
 fn duration_from_f64(value: f64) -> Duration {

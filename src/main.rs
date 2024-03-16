@@ -2,17 +2,19 @@ use config::Config;
 use logs::LogSender;
 use program::{Process, ProcessName};
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 mod commands;
 mod config;
 mod logs;
 mod program;
 
+const CONFIG_DEFAULT_PATH: &str = "config/run.yml";
+
 fn main() {
-    let config = Config::parse("config/run.yml".as_ref());
+    let config = Config::parse(CONFIG_DEFAULT_PATH.as_ref());
     let (log_sender, log_receiver) = std::sync::mpsc::channel();
-    let taskmaster = Arc::new(Taskmaster::new(log_sender, config));
+    let taskmaster = Arc::new(RwLock::new(Taskmaster::new(log_sender, config)));
 
     std::thread::spawn({
         let taskmaster = taskmaster.clone();
@@ -24,6 +26,8 @@ fn main() {
 
 /// Contains the state of the program.
 pub struct Taskmaster {
+    log_sender: LogSender,
+    config: Config,
     processes: Vec<Process>,
 }
 
@@ -32,7 +36,7 @@ impl Taskmaster {
     pub fn new(log_sender: LogSender, config: Config) -> Self {
         let mut processes = Vec::new();
 
-        for (name, config) in config.programs {
+        for (name, config) in config.programs.iter() {
             for replica_index in 0..config.replicas {
                 let name = ProcessName {
                     name: Arc::from(name.as_str()),
@@ -43,7 +47,11 @@ impl Taskmaster {
             }
         }
 
-        Self { processes }
+        Self {
+            log_sender,
+            processes,
+            config,
+        }
     }
 
     /// Gets a process by its name.
@@ -68,22 +76,23 @@ fn split_whitespace(s: &str) -> (&str, &str) {
     s.split_at(index)
 }
 
-fn handle_commands(taskmaster: &Taskmaster, mut line: &str) {
+fn handle_commands(taskmaster: &RwLock<Taskmaster>, mut line: &str) {
     let command;
     (command, line) = split_whitespace(line);
     line = line.trim();
 
     match command.trim() {
-        "start" => commands::start(line, taskmaster),
-        "stop" => commands::stop(line, taskmaster),
-        "restart" => commands::restart(line, taskmaster),
-        "status" => commands::status(line, taskmaster),
+        "start" => commands::start(line, &taskmaster.read().unwrap()),
+        "stop" => commands::stop(line, &taskmaster.read().unwrap()),
+        "restart" => commands::restart(line, &taskmaster.read().unwrap()),
+        "status" => commands::status(line, &taskmaster.read().unwrap()),
+        "reload" => commands::reload(line, &mut taskmaster.write().unwrap()),
         _ => println!("Unknown command: {}", command),
     }
 }
 
 /// Runs the shell.
-fn run_shell(taskmaster: Arc<Taskmaster>) {
+fn run_shell(taskmaster: Arc<RwLock<Taskmaster>>) {
     let mut readline = ft::readline::Readline::new();
 
     while readline.read().unwrap() {
