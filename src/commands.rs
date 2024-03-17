@@ -102,7 +102,7 @@ pub fn reload(_line: &str, taskmaster: &mut Taskmaster) {
 
                 taskmaster
                     .processes
-                    .retain(|p| p.name().name.as_ref() == name.as_str());
+                    .retain(|p| p.name().name.as_ref() != name.as_str());
 
                 for index in 0..config.replicas {
                     let name = ProcessName {

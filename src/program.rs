@@ -1,6 +1,7 @@
 //! This module is used to control the lifetime of a running program.
 
 use std::{
+    error::Error,
     ffi::c_int,
     fmt::Display,
     fs::{File, OpenOptions},
@@ -34,7 +35,7 @@ fn open_append(path: &Path) -> std::io::Result<File> {
 /// Creates a command from a program configuration.
 ///
 /// The returned command can be invoked to start the program once.
-fn create_command(config: &ProgramConfig) -> Command {
+fn create_command(config: &ProgramConfig) -> Result<Command, Box<dyn Error>> {
     let mut command = std::process::Command::new(&config.command);
 
     command.args(&config.args);
@@ -42,21 +43,21 @@ fn create_command(config: &ProgramConfig) -> Command {
     command.envs(&config.environment);
 
     if let Some(stdout) = &config.stdout {
-        let file = open_append(&stdout).unwrap();
+        let file = open_append(&stdout)?;
         command.stdout(file);
     } else {
         command.stdout(std::process::Stdio::null());
     }
 
     if let Some(stderr) = &config.stderr {
-        let file = open_append(&stderr).unwrap();
+        let file = open_append(&stderr)?;
         command.stderr(file);
     } else {
         command.stderr(std::process::Stdio::null());
     }
 
     if let Some(stdin) = &config.stdin {
-        let file = std::fs::File::open(stdin).unwrap();
+        let file = std::fs::File::open(stdin)?;
         command.stdin(file);
     } else {
         command.stdin(std::process::Stdio::null());
@@ -75,7 +76,7 @@ fn create_command(config: &ProgramConfig) -> Command {
         }
     }
 
-    command
+    Ok(command)
 }
 
 /// Sends a signal to a running process.
@@ -415,7 +416,7 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        self.force_stop().unwrap();
+        let _ = self.force_stop();
         self.state
             .update_observer_state(|s| s.process_removed = true);
     }
@@ -423,7 +424,19 @@ impl Drop for Process {
 
 /// Observes a running process. This should be running in a background thread.
 fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
-    let mut command = create_command(&state.config.read().unwrap());
+    let mut command = match create_command(&state.config.read().unwrap()) {
+        Ok(ok) => ok,
+        Err(err) => {
+            log_sender
+                .send(LogEvent {
+                    kind: LogEventKind::Failed(format!("can't create command: {err}")),
+                    time: Instant::now(),
+                    name: state.name.clone(),
+                })
+                .unwrap();
+            return;
+        }
+    };
 
     let healthy_uptime = duration_from_f64(state.config.read().unwrap().healthy_uptime);
 
@@ -526,7 +539,6 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
             }
         }
     }
-    println!("Process observer for {} is stopping", state.name);
 }
 
 fn duration_from_f64(value: f64) -> Duration {

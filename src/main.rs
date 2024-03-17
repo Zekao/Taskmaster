@@ -126,6 +126,8 @@ fn check_hangup(taskmaster: Arc<RwLock<Taskmaster>>) {
             println!("Hangup received, reloading config");
             commands::reload("", &mut taskmaster.write().unwrap());
         }
+
+        std::hint::spin_loop();
     }
 }
 
