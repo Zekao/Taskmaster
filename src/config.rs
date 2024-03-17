@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
+    error::Error,
     path::{Path, PathBuf},
 };
 
@@ -178,9 +179,10 @@ impl Config {
     /// # Panics
     ///
     /// This function panics if the file cannot be opened or parsed.
-    pub fn parse(file: &Path) -> Self {
-        let file = std::fs::File::open(file).unwrap();
-        serde_yaml::from_reader(file).unwrap()
+    pub fn parse(file: &Path) -> Result<Self, Box<dyn Error>> {
+        let file = std::fs::File::open(file)?;
+        let config = serde_yaml::from_reader(file)?;
+        Ok(config)
     }
 
     /// Computes the difference between `old` and `self`.

@@ -24,7 +24,11 @@ use crate::{
 
 /// Opens a file for appending.
 fn open_append(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new().create(true).append(true).open(path)
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open(path)
 }
 
 /// Creates a command from a program configuration.

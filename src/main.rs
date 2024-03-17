@@ -2,7 +2,13 @@ use config::Config;
 use logs::LogSender;
 use program::{Process, ProcessName};
 
-use std::sync::{Arc, RwLock};
+use std::{
+    ffi::c_int,
+    sync::{
+        atomic::{AtomicBool, Ordering::Relaxed},
+        Arc, RwLock,
+    },
+};
 
 mod commands;
 mod config;
@@ -12,8 +18,15 @@ mod program;
 const CONFIG_DEFAULT_PATH: &str = "config/run.yml";
 const LOG_DEFAULT_PATH: &str = "taskmaster.log";
 
-fn main() {
-    let config = Config::parse(CONFIG_DEFAULT_PATH.as_ref());
+fn main() -> std::process::ExitCode {
+    let config = match Config::parse(CONFIG_DEFAULT_PATH.as_ref()) {
+        Ok(ok) => ok,
+        Err(err) => {
+            eprintln!("\x1B[1;31merror\x1B[0m: can't parse config: {err}");
+            return 2u8.into();
+        }
+    };
+
     let (log_sender, log_receiver) = std::sync::mpsc::channel();
     let taskmaster = Arc::new(RwLock::new(Taskmaster::new(log_sender, config)));
 
@@ -30,6 +43,8 @@ fn main() {
     });
 
     run_shell(taskmaster);
+
+    0u8.into()
 }
 
 /// Contains the state of the program.
@@ -99,8 +114,32 @@ fn handle_commands(taskmaster: &RwLock<Taskmaster>, mut line: &str) {
     }
 }
 
+static HANGED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "C" fn hangup_handler(_signal: c_int) {
+    HANGED.store(true, Relaxed);
+}
+
+fn check_hangup(taskmaster: Arc<RwLock<Taskmaster>>) {
+    loop {
+        if HANGED.swap(false, Relaxed) {
+            println!("Hangup received, reloading config");
+            commands::reload("", &mut taskmaster.write().unwrap());
+        }
+    }
+}
+
 /// Runs the shell.
 fn run_shell(taskmaster: Arc<RwLock<Taskmaster>>) {
+    unsafe {
+        libc::signal(libc::SIGHUP, hangup_handler as usize);
+    }
+
+    std::thread::spawn({
+        let taskmaster = taskmaster.clone();
+        move || check_hangup(taskmaster)
+    });
+
     let mut readline = ft::readline::Readline::new();
 
     while readline.read().unwrap() {

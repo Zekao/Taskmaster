@@ -57,7 +57,13 @@ pub fn restart(line: &str, taskmaster: &Taskmaster) {
 }
 
 pub fn reload(_line: &str, taskmaster: &mut Taskmaster) {
-    let new_config = Config::parse(CONFIG_DEFAULT_PATH.as_ref());
+    let new_config = match Config::parse(CONFIG_DEFAULT_PATH.as_ref()) {
+        Ok(config) => config,
+        Err(err) => {
+            println!("\x1B[1;31merror\x1B[0m: can't reload config: {err}");
+            return;
+        }
+    };
     let diff = new_config.diff_since(&taskmaster.config);
 
     if diff.is_empty() {
