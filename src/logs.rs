@@ -78,7 +78,13 @@ pub fn gather_logs(
                     .read()
                     .unwrap()
                     .get_process_by_process_name(&ev.name)
-                    .is_some_and(|p| p.config().read().unwrap().exit_code != status.like_bash())
+                    .is_some_and(|p| {
+                        !p.config()
+                            .read()
+                            .unwrap()
+                            .exit_code
+                            .contains(&status.like_bash())
+                    })
                 {
                     special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file);
                 } else {

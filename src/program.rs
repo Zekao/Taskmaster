@@ -524,7 +524,12 @@ fn process_observer(log_sender: LogSender, state: Arc<ProcessState>) {
 
         match state.config.read().unwrap().restart {
             RestartPolicy::OnFailure
-                if status.like_bash() == state.config.read().unwrap().exit_code =>
+                if state
+                    .config
+                    .read()
+                    .unwrap()
+                    .exit_code
+                    .contains(&status.like_bash()) =>
             {
                 state.observer_state.lock().unwrap().standby = true;
             }

@@ -3,7 +3,8 @@ programs:
     command: config/goodnight
     at_launch: true
     restart: on_failure
-    exit_code: 130
+    exit_code:
+      - 130
     signal: SIGINT
     replicas: 3
     healthy_uptime: 5
@@ -12,7 +13,8 @@ programs:
     command: config/signal
     at_launch: true
     restart: on_failure
-    exit_code: 130
+    exit_code:
+      - 130
     signal: SIGINT
     replicas: 1
     healthy_uptime: 5
@@ -22,9 +24,11 @@ programs:
       key: BAZ
     at_launch: true
     workdir: /tmp
-    stdout: /Users/zekao/Desktop/42 | Projects/Taskmaster/ntm_test.txt
+    stdout: /dev/null
     restart: on_failure
-    exit_code: 42
+    exit_code:
+      - 130
+      - 0
 
   rap:
     command: config/ratio
@@ -44,7 +48,8 @@ programs:
     replicas: 3
     at_launch: false
     restart: on_failure
-    exit_code: 42
+    exit_code:
+      - 42
     healthy_uptime: 5
     retries: 3
     signal: SIGTERM
@@ -61,7 +66,8 @@ programs:
     replicas: 3
     at_launch: false
     restart: on_failure
-    exit_code: 42
+    exit_code:
+      - 215
     healthy_uptime: 5
     retries: 3
     signal: SIGTERM

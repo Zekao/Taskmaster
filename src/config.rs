@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     error::Error,
     path::{Path, PathBuf},
 };
@@ -107,7 +107,7 @@ pub struct ProgramConfig {
     pub restart: RestartPolicy,
     /// The expected exit code of the program.
     #[serde(default = "defaults::exit_code")]
-    pub exit_code: u32,
+    pub exit_code: HashSet<u32>,
     /// The amount of time to wait before marking the process as "healthy".
     #[serde(default = "defaults::healthy_uptime")]
     pub healthy_uptime: f64,
@@ -141,6 +141,8 @@ pub struct ProgramConfig {
 }
 
 mod defaults {
+    use std::collections::HashSet;
+
     pub fn retries() -> u32 {
         3
     }
@@ -149,8 +151,10 @@ mod defaults {
         0.0
     }
 
-    pub fn exit_code() -> u32 {
-        0
+    pub fn exit_code() -> HashSet<u32> {
+        let mut set = HashSet::new();
+        set.insert(0);
+        set
     }
 
     pub fn at_launch() -> bool {
