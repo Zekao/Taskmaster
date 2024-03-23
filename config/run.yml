@@ -27,8 +27,7 @@ programs:
     stdout: /dev/null
     restart: on_failure
     exit_code:
-      - 130
-      - 0
+      - 2
 
   rap:
     command: config/ratio

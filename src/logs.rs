@@ -45,7 +45,7 @@ pub fn gather_logs(
     mut file: std::fs::File,
 ) {
     let start_instant = Instant::now();
-
+    let mut client = reqwest::blocking::Client::new();
     while let Ok(ev) = receiver.recv() {
         let since_start = ev.time.saturating_duration_since(start_instant);
 
@@ -62,16 +62,21 @@ pub fn gather_logs(
                 millis
             ),
             &mut file,
+            &mut client,
         );
 
-        special_print(&format!("{: <10}  ", ev.name), &mut file);
+        special_print(&format!("{: <10}  ", ev.name), &mut file, &mut client);
 
         match ev.kind {
-            LogEventKind::Starting => special_print("\x1B[1;36mSTARTING\x1B[0m  ", &mut file),
-            LogEventKind::Started => special_print("\x1B[1;32mSTARTED\x1B[0m   ", &mut file),
+            LogEventKind::Starting => {
+                special_print("\x1B[1;36mSTARTING\x1B[0m  ", &mut file, &mut client)
+            }
+            LogEventKind::Started => {
+                special_print("\x1B[1;32mSTARTED\x1B[0m   ", &mut file, &mut client)
+            }
             LogEventKind::Failed(message) => {
-                special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file);
-                special_print(&message, &mut file);
+                special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file, &mut client);
+                special_print(&message, &mut file, &mut client);
             }
             LogEventKind::Exited(status) => {
                 if taskmaster
@@ -86,24 +91,28 @@ pub fn gather_logs(
                             .contains(&status.like_bash())
                     })
                 {
-                    special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file);
+                    special_print("\x1B[1;31mFAILED\x1B[0m    ", &mut file, &mut client);
                 } else {
-                    special_print("\x1B[1;33mEXITED\x1B[0m    ", &mut file);
+                    special_print("\x1B[1;33mEXITED\x1B[0m    ", &mut file, &mut client);
                 }
 
-                special_print(&format!("exit code {}", status), &mut file);
+                special_print(&format!("exit code {}", status), &mut file, &mut client);
             }
             LogEventKind::Killed => {
-                special_print("\x1B[1;31mKILLED\x1B[0m    ", &mut file);
+                special_print("\x1B[1;31mKILLED\x1B[0m    ", &mut file, &mut client);
             }
         }
 
-        special_print("\n", &mut file);
+        special_print("\n", &mut file, &mut client);
     }
 }
 
 /// Prints a string to the standard output and to a file.
-fn special_print(string: &str, file: &mut std::fs::File) {
+fn special_print(string: &str, file: &mut std::fs::File, client: &mut reqwest::blocking::Client) {
+    let _ = client
+        .post(std::env::var("SERVER_URL").unwrap_or("http://localhost:8080/".into()))
+        .body(string.to_owned())
+        .send();
     print!("{}", string);
     file.write_all(string.as_bytes()).unwrap();
 }
