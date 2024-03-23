@@ -1,6 +1,6 @@
 programs:
-  goodnight:
-    command: config/goodnight
+  wait:
+    command: config/wait_prg
     at_launch: true
     restart: on_failure
     exit_code:
@@ -10,7 +10,7 @@ programs:
     healthy_uptime: 5
 
   signal:
-    command: config/signal
+    command: config/signal_prg
     at_launch: true
     restart: on_failure
     exit_code:
@@ -18,26 +18,25 @@ programs:
     signal: SIGINT
     replicas: 1
     healthy_uptime: 5
+
   tests:
     command: /bin/ls
     environment:
       key: BAZ
-    at_launch: true
+    at_launch: false
     workdir: /tmp
     stdout: /dev/null
     restart: on_failure
     exit_code:
       - 2
 
-  rap:
-    command: config/ratio
-    args:
-      - "hello"
-      - "world"
+  env:
+    command: config/env_prg
     environment:
-      key: BAZ
+      foo: BAR
     healthy_uptime: 5
-    at_launch: true
+    at_launch: false
+    stdout: /dev/stdout
 
   hello:
     command: /bin/echo
@@ -77,3 +76,21 @@ programs:
       key: BAZ
     workdir: /app
     umask: 777
+
+  umask:
+    command: config/umask_prg
+    at_launch: false
+    umask: 707
+
+  failure:
+    command: config/failure_prg
+    exit_code:
+      - 1
+      - 212
+
+  success:
+    command: config/failure_prg
+    exit_code:
+      - 215
+      - 12
+      - 42
